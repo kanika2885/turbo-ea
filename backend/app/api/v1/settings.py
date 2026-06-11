@@ -17,6 +17,7 @@ from app.models.card_type import CardType
 from app.models.compliance_regulation import ComplianceRegulation
 from app.models.relation_type import RelationType
 from app.models.user import User
+from app.services.ai_service import DEFAULT_AZURE_API_VERSION
 from app.services.permission_service import PermissionService
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -169,6 +170,7 @@ async def get_bootstrap(db: AsyncSession = Depends(get_db)):
         "ppm_enabled": general.get("ppmEnabled", False),
         "turbolens_enabled": general.get("turboLensEnabled", True),
         "grc_enabled": general.get("grcEnabled", True),
+        "file_uploads_enabled": general.get("fileUploadsEnabled", True),
         "enabled_locales": general.get("enabledLocales", SUPPORTED_LOCALES),
         "fiscal_year_start": general.get("fiscalYearStart", 1),
         "bpm_row_order": general.get("bpmRowOrder", ["management", "core", "support"]),
@@ -525,6 +527,37 @@ async def update_ppm_enabled(
     row = await _get_or_create_row(db)
     general = dict(row.general_settings or {})
     general["ppmEnabled"] = body.enabled
+    row.general_settings = general
+
+    await db.commit()
+    return {"ok": True}
+
+
+class FileUploadsEnabledPayload(BaseModel):
+    enabled: bool
+
+
+@router.get("/file-uploads-enabled")
+async def get_file_uploads_enabled(db: AsyncSession = Depends(get_db)):
+    """Public endpoint — returns whether card file uploads are enabled."""
+    result = await db.execute(select(AppSettings).where(AppSettings.id == "default"))
+    row = result.scalar_one_or_none()
+    general = (row.general_settings if row else None) or {}
+    return {"enabled": general.get("fileUploadsEnabled", True)}
+
+
+@router.patch("/file-uploads-enabled")
+async def update_file_uploads_enabled(
+    body: FileUploadsEnabledPayload,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Admin endpoint — enable or disable card file uploads."""
+    await PermissionService.require_permission(db, user, "admin.settings")
+
+    row = await _get_or_create_row(db)
+    general = dict(row.general_settings or {})
+    general["fileUploadsEnabled"] = body.enabled
     row.general_settings = general
 
     await db.commit()
@@ -963,7 +996,7 @@ async def update_registration_settings(
 
 
 _AI_KEY_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-_VALID_PROVIDER_TYPES = {"ollama", "openai", "anthropic"}
+_VALID_PROVIDER_TYPES = {"ollama", "openai", "azure_openai", "anthropic"}
 
 
 class AiSettingsPayload(BaseModel):
@@ -972,6 +1005,7 @@ class AiSettingsPayload(BaseModel):
     provider_url: str = ""
     api_key: str = ""
     model: str = ""
+    api_version: str = DEFAULT_AZURE_API_VERSION
     search_provider: str = "duckduckgo"
     search_url: str = ""
     enabled_types: list[str] = []
@@ -1006,6 +1040,7 @@ async def get_ai_settings(
         "provider_url": ai.get("providerUrl", ""),
         "api_key": _AI_KEY_MASK if api_key_stored else "",
         "model": ai.get("model", ""),
+        "api_version": ai.get("apiVersion", DEFAULT_AZURE_API_VERSION),
         "search_provider": ai.get("searchProvider", "duckduckgo"),
         "search_url": ai.get("searchUrl", ""),
         "enabled_types": ai.get("enabledTypes", []),
@@ -1048,12 +1083,21 @@ async def update_ai_settings(
     if provider_type == "anthropic" and not provider_url:
         provider_url = "https://api.anthropic.com"
 
+    # Azure requires a provider URL
+    if provider_type == "azure_openai" and not provider_url:
+        raise HTTPException(
+            400,
+            "Provider URL is required for Azure Hosted OpenAI "
+            "(e.g. https://your-resource.openai.azure.com).",
+        )
+
     general["ai"] = {
         "enabled": body.enabled,
         "providerType": provider_type,
         "providerUrl": provider_url,
         "apiKey": encrypted_key,
         "model": body.model,
+        "apiVersion": body.api_version if provider_type == "azure_openai" else "",
         "searchProvider": "duckduckgo",
         "searchUrl": "",
         "enabledTypes": body.enabled_types,
@@ -1086,18 +1130,26 @@ async def test_ai_connection(
     model = ai.get("model", "")
     encrypted_key = ai.get("apiKey", "")
 
-    if not provider_url and provider_type != "anthropic":
+    if not provider_url and provider_type not in ("anthropic", "azure_openai"):
         raise HTTPException(400, "AI provider URL is not configured.")
 
     # Use default Anthropic URL if not set
     if provider_type == "anthropic" and not provider_url:
         provider_url = "https://api.anthropic.com"
 
+    if provider_type == "azure_openai" and not provider_url:
+        raise HTTPException(
+            400,
+            "Provider URL is required for Azure Hosted OpenAI.",
+        )
+
     # Decrypt API key for the test
     api_key = decrypt_value(encrypted_key) if encrypted_key else ""
 
-    if provider_type in ("openai", "anthropic") and not api_key:
+    if provider_type in ("openai", "azure_openai", "anthropic") and not api_key:
         raise HTTPException(400, "API key is required for commercial LLM providers.")
+
+    api_version = ai.get("apiVersion", DEFAULT_AZURE_API_VERSION)
 
     try:
         result = await check_provider_connection(
@@ -1105,6 +1157,7 @@ async def test_ai_connection(
             provider_type=provider_type,
             api_key=api_key,
             model=model,
+            api_version=api_version,
         )
     except _httpx.HTTPError as exc:
         raise HTTPException(502, str(exc)) from exc
@@ -1112,7 +1165,7 @@ async def test_ai_connection(
     return result
 
 
-SUPPORTED_LOCALES = ["en", "de", "fr", "es", "it", "pt", "zh", "ru"]
+SUPPORTED_LOCALES = ["en", "de", "fr", "es", "it", "pt", "zh", "ru", "da"]
 
 
 class EnabledLocalesPayload(BaseModel):

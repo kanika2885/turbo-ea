@@ -258,6 +258,11 @@
             "title": "Api Key",
             "type": "string"
           },
+          "api_version": {
+            "default": "2025-01-01",
+            "title": "Api Version",
+            "type": "string"
+          },
           "enabled": {
             "default": false,
             "title": "Enabled",
@@ -4273,6 +4278,19 @@
         "title": "FieldMappingUpdate",
         "type": "object"
       },
+      "FileUploadsEnabledPayload": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "FileUploadsEnabledPayload",
+        "type": "object"
+      },
       "FiscalYearStartPayload": {
         "properties": {
           "month": {
@@ -4323,6 +4341,21 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImpersonateRequest": {
+        "properties": {
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "ImpersonateRequest",
         "type": "object"
       },
       "ImportPrinciplesRequest": {
@@ -8938,6 +8971,248 @@
         "title": "RiskCreate",
         "type": "object"
       },
+      "RiskImportItem": {
+        "description": "One spreadsheet row for the risk importer.\n\nEnum-ish fields are typed as ``str`` (not ``Literal``) on purpose: a bad\nvalue should produce a clean per-row error in the response rather than a\n422 that fails the entire batch. The handler validates them against the\n``*_VALUES`` tuples in ``risk_service``.",
+        "properties": {
+          "card_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Card Names",
+            "type": "array"
+          },
+          "category": {
+            "default": "operational",
+            "title": "Category",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "initial_impact": {
+            "default": "medium",
+            "title": "Initial Impact",
+            "type": "string"
+          },
+          "initial_probability": {
+            "default": "medium",
+            "title": "Initial Probability",
+            "type": "string"
+          },
+          "owner_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Email"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Name"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "residual_impact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Impact"
+          },
+          "residual_probability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Probability"
+          },
+          "row_index": {
+            "title": "Row Index",
+            "type": "integer"
+          },
+          "status": {
+            "default": "identified",
+            "title": "Status",
+            "type": "string"
+          },
+          "target_resolution_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Resolution Date"
+          },
+          "title": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "row_index",
+          "title"
+        ],
+        "title": "RiskImportItem",
+        "type": "object"
+      },
+      "RiskImportRequest": {
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RiskImportItem"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "RiskImportRequest",
+        "type": "object"
+      },
+      "RiskImportResponse": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/RiskImportResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "created",
+          "failed"
+        ],
+        "title": "RiskImportResponse",
+        "type": "object"
+      },
+      "RiskImportResult": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "row_index": {
+            "title": "Row Index",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "created",
+              "skipped",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "row_index",
+          "status"
+        ],
+        "title": "RiskImportResult",
+        "type": "object"
+      },
       "RiskListPage": {
         "properties": {
           "items": {
@@ -11112,6 +11387,38 @@
               }
             ],
             "title": "Due Date"
+          },
+          "lead_time_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Time Days"
+          },
+          "recurrence_interval": {
+            "default": 1,
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Recurrence Interval",
+            "type": "integer"
+          },
+          "recurrence_unit": {
+            "default": "none",
+            "enum": [
+              "none",
+              "days",
+              "weeks",
+              "months",
+              "years"
+            ],
+            "title": "Recurrence Unit",
+            "type": "string"
           }
         },
         "required": [
@@ -11154,6 +11461,50 @@
               }
             ],
             "title": "Due Date"
+          },
+          "lead_time_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Time Days"
+          },
+          "recurrence_interval": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recurrence Interval"
+          },
+          "recurrence_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "none",
+                  "days",
+                  "weeks",
+                  "months",
+                  "years"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recurrence Unit"
           },
           "status": {
             "anyOf": [
@@ -11814,6 +12165,28 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "impersonated_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impersonated Role"
+          },
+          "impersonated_role_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impersonated Role Label"
           },
           "is_active": {
             "title": "Is Active",
@@ -13539,6 +13912,48 @@
         ]
       }
     },
+    "/api/v1/auth/impersonate": {
+      "post": {
+        "description": "Start a role-impersonation session.\n\nRequires ``admin.impersonate``. Issues a fresh JWT carrying an\n``impersonated_role`` claim \u2014 the rest of the request lifecycle\n(PermissionService, audit fan-out) honours it. The real ``user.role``\ncolumn is never modified; impersonation lives entirely in the token.",
+        "operationId": "impersonate_role_api_v1_auth_impersonate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImpersonateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Impersonate Role",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login_api_v1_auth_login_post",
@@ -13823,6 +14238,28 @@
           }
         },
         "summary": "Sso Config Endpoint",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/stop-impersonating": {
+      "post": {
+        "description": "End a role-impersonation session.\n\nReads the current JWT; if there's no active impersonation, returns\n400 to flag the misuse (caller has stale UI state). Issues a fresh\nJWT without the claim so all subsequent checks revert to the user's\nreal role.",
+        "operationId": "stop_impersonating_api_v1_auth_stop_impersonating_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Stop Impersonating",
         "tags": [
           "auth"
         ]
@@ -25328,6 +25765,48 @@
         ]
       }
     },
+    "/api/v1/risks/bulk-import": {
+      "post": {
+        "description": "Spreadsheet importer for the Risk Register \u2014 create-only.\n\nEach row carries its own ``row_index`` so the caller can pair the\nresponse back to its spreadsheet row. A row whose ``reference`` matches\nan existing risk is **skipped** \u2014 the importer never updates existing\nrisks, so re-importing a previously exported register is idempotent.\nEvery other row creates a brand-new risk with a freshly generated\n``R-NNNNNN`` reference. Owner is resolved best-effort by email\n(preferred) or exact display name; cards are linked best-effort by exact\nname. Unresolved / ambiguous values produce a non-blocking warning and\nare skipped \u2014 the risk still imports.\n\n``dry_run=True`` runs every validator and resolver, then rolls back so\nthe UI can preview the outcome without persisting anything (and without\nemitting owner Todos, notifications, or card-timeline events).\nPermission: ``risks.manage``.",
+        "operationId": "bulk_import_risks_api_v1_risks_bulk_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Import Risks",
+        "tags": [
+          "Risks"
+        ]
+      }
+    },
     "/api/v1/risks/metrics": {
       "get": {
         "description": "KPI payload. Accepts the same filters as ``GET /risks`` so the\nmatrix + tiles follow the user's selected view.",
@@ -28101,6 +28580,64 @@
         ]
       }
     },
+    "/api/v1/settings/file-uploads-enabled": {
+      "get": {
+        "description": "Public endpoint \u2014 returns whether card file uploads are enabled.",
+        "operationId": "get_file_uploads_enabled_api_v1_settings_file_uploads_enabled_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get File Uploads Enabled",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "Admin endpoint \u2014 enable or disable card file uploads.",
+        "operationId": "update_file_uploads_enabled_api_v1_settings_file_uploads_enabled_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileUploadsEnabledPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update File Uploads Enabled",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/v1/settings/fiscal-year-start": {
       "get": {
         "description": "Public endpoint \u2014 returns the fiscal year start month (1-12).",
@@ -30415,6 +30952,47 @@
           }
         },
         "summary": "Update Todo",
+        "tags": [
+          "todos"
+        ]
+      }
+    },
+    "/api/v1/todos/{todo_id}/promote": {
+      "post": {
+        "description": "Manually activate a scheduled recurring todo (\"do the review early\").\n\nShort-circuits the wait for the daily promotion loop. Idempotent on\ntodos that are already open.",
+        "operationId": "promote_todo_api_v1_todos__todo_id__promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "todo_id",
+            "required": true,
+            "schema": {
+              "title": "Todo Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote Todo",
         "tags": [
           "todos"
         ]

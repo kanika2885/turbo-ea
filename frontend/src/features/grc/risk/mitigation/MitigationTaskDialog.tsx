@@ -23,8 +23,8 @@ import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
 import type { MitigationTask, RecurrenceUnit } from "@/types";
-import { defaultLeadTimeDays } from "./leadTime";
-import { RECURRENCE_UNIT_OPTIONS } from "./recurrenceLabel";
+import { defaultLeadTimeDays } from "@/lib/recurrence/leadTime";
+import { RECURRENCE_UNIT_OPTIONS } from "@/lib/recurrence/recurrenceLabel";
 
 interface UserOption {
   id: string;
@@ -59,7 +59,7 @@ export default function MitigationTaskDialog({
   onClose,
   onSubmit,
 }: Props) {
-  const { t } = useTranslation("delivery");
+  const { t } = useTranslation("grc");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");

@@ -11,6 +11,12 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import ListItemText from "@mui/material/ListItemText";
+import ListSubheader from "@mui/material/ListSubheader";
+import { WeightBadge } from "./metamodel/ImportanceSlider";
 import {
   DndContext,
   closestCenter,
@@ -52,6 +58,10 @@ const BUILTIN_SECTIONS: { key: string; labelKey: string; icon: string; onlyIf?: 
   { key: "successors", labelKey: "cardLayout.builtinSections.successors", icon: "arrow_forward", onlyIf: (ct) => ct.has_successors },
   { key: "relations", labelKey: "cardLayout.builtinSections.relations", icon: "hub" },
 ];
+
+// Built-in layout sections that are also data-quality contributors, so their
+// header shows the same weight badge as fields (mirrors __dataQuality buckets).
+const DQ_SECTION_KEYS = new Set(["description", "lifecycle", "relations"]);
 
 const DEFAULT_ORDER = ["description", "eol", "lifecycle", "__custom__", "hierarchy", "successors", "relations"];
 
@@ -172,6 +182,27 @@ function containersToFields(containers: Containers, fieldMap: Map<string, FieldD
   return result;
 }
 
+// Move a single field from one section to another, preserving its definition.
+// The field lands at the end of the target section's first column, ungrouped
+// (the target may not share the source's columns/groups). Returns a new schema,
+// or null if the move is a no-op / the field can't be found.
+export function moveFieldBetweenSections(
+  schema: SectionDef[],
+  fromIdx: number,
+  fieldKey: string,
+  toIdx: number,
+): SectionDef[] | null {
+  if (fromIdx === toIdx) return null;
+  if (fromIdx < 0 || toIdx < 0 || fromIdx >= schema.length || toIdx >= schema.length) return null;
+  const next = schema.map((s) => ({ ...s, fields: [...(s.fields || [])] }));
+  const src = next[fromIdx].fields;
+  const i = src.findIndex((f) => f.key === fieldKey);
+  if (i < 0) return null;
+  const [field] = src.splice(i, 1);
+  next[toIdx].fields.push({ ...field, group: undefined, column: 0 });
+  return next;
+}
+
 // ── FieldCard (display component, used by sortable wrapper + overlay) ──
 
 function FieldCard({
@@ -180,6 +211,7 @@ function FieldCard({
   isProtected,
   onEdit,
   onDelete,
+  onMove,
   isDragging,
 }: {
   field: FieldDef;
@@ -187,8 +219,10 @@ function FieldCard({
   isProtected?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
+  onMove?: (e: React.MouseEvent<HTMLElement>) => void;
   isDragging?: boolean;
 }) {
+  const { t } = useTranslation(["admin"]);
   const rl = useResolveLabel();
   return (
     <Box
@@ -208,9 +242,15 @@ function FieldCard({
         {isProtected ? field.label : rl(field.key, field.translations)}
         {isCalc && <Chip component="span" size="small" label="calc" color="info" sx={{ ml: 0.5, height: 16, fontSize: "0.6rem" }} />}
       </Typography>
+      <WeightBadge weight={field.weight} />
       <Chip size="small" label={field.type.replace("_", " ")} sx={{ bgcolor: fieldTypeColor(field.type), color: "#fff", height: 18, fontSize: "0.6rem" }} />
-      {(!isProtected && (onEdit || onDelete)) && (
+      {(!isProtected && (onEdit || onDelete || onMove)) && (
         <Box className="field-actions" sx={{ display: "flex", gap: 0.25, opacity: 0, transition: "opacity 0.15s" }}>
+          {onMove && (
+            <Tooltip title={t("cardLayout.moveFieldTooltip")}>
+              <IconButton size="small" onClick={onMove} sx={{ p: 0.25 }}><MaterialSymbol icon="drive_file_move" size={16} /></IconButton>
+            </Tooltip>
+          )}
           {onEdit && <IconButton size="small" onClick={onEdit} sx={{ p: 0.25 }}><MaterialSymbol icon="edit" size={16} /></IconButton>}
           {onDelete && <IconButton size="small" onClick={onDelete} sx={{ p: 0.25 }}><MaterialSymbol icon="delete" size={16} /></IconButton>}
         </Box>
@@ -222,10 +262,11 @@ function FieldCard({
 // ── SortableFieldCard ────────────────────────────────────────────
 
 function SortableFieldCard({
-  id, field, isCalc, onEdit, onDelete,
+  id, field, isCalc, onEdit, onDelete, onMove,
 }: {
   id: string; field: FieldDef; isCalc?: boolean;
   onEdit?: () => void; onDelete?: () => void;
+  onMove?: (e: React.MouseEvent<HTMLElement>) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
@@ -240,7 +281,7 @@ function SortableFieldCard({
           <MaterialSymbol icon="drag_indicator" size={16} color="#bbb" />
         </Box>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <FieldCard field={field} isCalc={isCalc} onEdit={onEdit} onDelete={onDelete} isDragging={isDragging} />
+          <FieldCard field={field} isCalc={isCalc} onEdit={onEdit} onDelete={onDelete} onMove={onMove} isDragging={isDragging} />
         </Box>
       </Box>
     </Box>
@@ -385,12 +426,47 @@ function VisualFieldLayout({
   promptDeleteField: (si: number, fi: number) => void;
 }) {
   const { t } = useTranslation(["admin", "common"]);
+  const rl = useResolveLabel();
   const cols = section.columns || 1;
   const [containers, setContainers] = useState<Containers>(() => fieldsToContainers(section.fields, cols, section.groups));
   const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
   const [cloned, setCloned] = useState<Containers | null>(null);
   const [addingGroup, setAddingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
+  const [moveAnchor, setMoveAnchor] = useState<HTMLElement | null>(null);
+  const [moveFieldKey, setMoveFieldKey] = useState<string | null>(null);
+
+  // Other sections this field can be moved into (skip the special description bucket).
+  const moveTargets = useMemo(
+    () =>
+      fieldsSchema
+        .map((s, i) => ({ section: s, idx: i }))
+        .filter(({ section: s, idx }) => idx !== sectionIdx && s.section !== "__description"),
+    [fieldsSchema, sectionIdx],
+  );
+
+  const openMoveMenu = useCallback((fieldKey: string, e: React.MouseEvent<HTMLElement>) => {
+    setMoveFieldKey(fieldKey);
+    setMoveAnchor(e.currentTarget);
+  }, []);
+
+  const closeMoveMenu = useCallback(() => {
+    setMoveAnchor(null);
+    setMoveFieldKey(null);
+  }, []);
+
+  const handleMoveToSection = useCallback(
+    async (targetIdx: number) => {
+      const key = moveFieldKey;
+      closeMoveMenu();
+      if (!key) return;
+      const next = moveFieldBetweenSections(fieldsSchema, sectionIdx, key, targetIdx);
+      if (!next) return;
+      await api.patch(`/metamodel/types/${typeKey}`, { fields_schema: next });
+      onRefresh();
+    },
+    [moveFieldKey, closeMoveMenu, fieldsSchema, sectionIdx, typeKey, onRefresh],
+  );
 
   const fieldMap = useMemo(() => {
     const m = new Map<string, FieldDef>();
@@ -663,6 +739,7 @@ function VisualFieldLayout({
                     isCalc={calculatedFieldKeys.includes(fk)}
                     onEdit={fi >= 0 ? () => openEditField(sectionIdx, fi) : undefined}
                     onDelete={fi >= 0 ? () => promptDeleteField(sectionIdx, fi) : undefined}
+                    onMove={moveTargets.length > 0 ? (e) => openMoveMenu(fk, e) : undefined}
                   />
                 );
               })}
@@ -679,6 +756,7 @@ function VisualFieldLayout({
           isCalc={calculatedFieldKeys.includes(itemId)}
           onEdit={fi >= 0 ? () => openEditField(sectionIdx, fi) : undefined}
           onDelete={fi >= 0 ? () => promptDeleteField(sectionIdx, fi) : undefined}
+          onMove={moveTargets.length > 0 ? (e) => openMoveMenu(itemId, e) : undefined}
         />
       );
     });
@@ -763,6 +841,26 @@ function VisualFieldLayout({
           )}
         </DragOverlay>
       </DndContext>
+
+      <Menu
+        anchorEl={moveAnchor}
+        open={Boolean(moveAnchor)}
+        onClose={closeMoveMenu}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        transformOrigin={{ vertical: "top", horizontal: "right" }}
+      >
+        <ListSubheader sx={{ lineHeight: 2, bgcolor: "transparent" }}>
+          {t("cardLayout.moveToSection")}
+        </ListSubheader>
+        {moveTargets.map(({ section: s, idx }) => (
+          <MenuItem key={idx} onClick={() => handleMoveToSection(idx)}>
+            <ListItemIcon>
+              <MaterialSymbol icon="tune" size={18} />
+            </ListItemIcon>
+            <ListItemText>{rl(s.section, s.translations)}</ListItemText>
+          </MenuItem>
+        ))}
+      </Menu>
     </Box>
   );
 }
@@ -851,7 +949,7 @@ function DescriptionFieldsPanel({
 
 function SortableSectionItem({
   id, sectionKey, info, cfg, expanded, onToggleExpand,
-  onToggleCollapsed, onToggleHidden, onDelete, children,
+  onToggleCollapsed, onToggleHidden, onDelete, children, dqWeight,
 }: {
   id: string; sectionKey: string;
   info: { label: string; icon: string; isCustom: boolean; labelKey?: string; section?: SectionDef | null };
@@ -861,6 +959,7 @@ function SortableSectionItem({
   onToggleHidden: () => void;
   onDelete?: () => void;
   children?: React.ReactNode;
+  dqWeight?: number;
 }) {
   const { t } = useTranslation(["admin"]);
   const rl = useResolveLabel();
@@ -877,6 +976,7 @@ function SortableSectionItem({
         <Box onClick={canExpand ? onToggleExpand : undefined} sx={{ display: "flex", alignItems: "center", gap: 0.75, flex: 1, cursor: canExpand ? "pointer" : "default" }}>
           <MaterialSymbol icon={info.icon} size={20} color={cfg.hidden ? "#bbb" : "#666"} />
           <Typography variant="body2" fontWeight={600} sx={{ color: cfg.hidden ? "text.disabled" : "text.primary" }}>{info.labelKey ? t(info.labelKey) : (info.isCustom ? rl(info.label, info.section?.translations) : info.label)}</Typography>
+          {dqWeight !== undefined && <WeightBadge weight={dqWeight} />}
         </Box>
         <Tooltip title={t("cardLayout.collapsedByDefault")}>
           <FormControlLabel
@@ -926,7 +1026,8 @@ export default function CardLayoutEditor({
   cardType, onRefresh, openAddField, openEditField, promptDeleteField, promptDeleteSection, calculatedFieldKeys,
 }: CardLayoutEditorProps) {
   const { t } = useTranslation(["admin", "common"]);
-  const secCfg = (cardType.section_config || {}) as Record<string, SectionConfig> & { __order?: string[] };
+  const secCfg = (cardType.section_config || {}) as Record<string, SectionConfig> & { __order?: string[]; __dataQuality?: Record<string, number> };
+  const dqConfig = secCfg.__dataQuality || {};
   const customSections = cardType.fields_schema.filter((s) => s.section !== "__description");
   const sectionOrder = getSectionOrder(secCfg, customSections, cardType.has_hierarchy, cardType.has_successors);
 
@@ -1024,6 +1125,7 @@ export default function CardLayoutEditor({
                 onToggleCollapsed={() => updateSectionProp(key, { defaultExpanded: cfgForSection.defaultExpanded === false })}
                 onToggleHidden={() => updateSectionProp(key, { hidden: !cfgForSection.hidden })}
                 onDelete={info.isCustom && promptDeleteSection && schemaIdx >= 0 ? () => promptDeleteSection(schemaIdx) : undefined}
+                dqWeight={DQ_SECTION_KEYS.has(key) ? (dqConfig[key] ?? 1) : undefined}
               >
                 {info.isCustom && info.section && schemaIdx >= 0 && (
                   <VisualFieldLayout

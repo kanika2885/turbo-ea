@@ -51,12 +51,12 @@ When working on this codebase, follow these conventions:
 - It provides AI tool access to EA data via the [Model Context Protocol](https://modelcontextprotocol.io/) (FastMCP library).
 - **Two transport modes**: HTTP/SSE (production, via Docker `--profile mcp`) and stdio (local testing with Claude Desktop).
 - **Authentication**: In HTTP mode, users authenticate via OAuth 2.1 delegated to the Turbo EA SSO provider. The MCP server resolves OAuth tokens to Turbo EA JWTs. In stdio mode, `TURBO_EA_EMAIL`/`TURBO_EA_PASSWORD` env vars are used for direct login.
-- **Read tools** (25, across six clusters). **Cards & metamodel**: `search_cards`, `get_card`, `get_card_relations`, `get_card_hierarchy`, `list_card_types`, `get_relation_types`. **Dashboards**: `get_dashboard`, `get_landscape`. **GRC (Risk Register)**: `list_risks`, `get_risk`, `get_risk_metrics`, `get_card_risks`. **GRC (Compliance)**: `list_compliance_findings`, `get_compliance_overview`. **Governance & Delivery**: `list_principles`, `list_adrs`, `get_adr`, `list_soaws`. **Reports**: `get_portfolio_report`, `get_cost_treemap`, `get_capability_heatmap`, `get_data_quality_report`. **Card context**: `get_card_stakeholders`, `get_card_comments`, `get_card_documents`.
-- **Audit & change history** (1). `get_change_history(batch_id?, actor_user_id?, tool_name?, origin?, limit?)` surfaces the mutation-batch ledger so agents and admins can reconstruct exactly what a previous MCP commit changed from a single id. Wraps `GET /mutation-batches` and `GET /mutation-batches/{id}/events`.
-- **Write tools — artifact import** (5). The agent reads artifacts from its own context (spreadsheets, BPMN XML, DrawIO XML, PDFs, images) and calls these tools to land structured rows in Turbo EA: `create_cards_bulk(cards, dry_run=True)` → `POST /cards/bulk-create`; `resolve_card_refs(refs)` → `POST /cards/resolve-refs` (name-to-UUID pre-check); `upsert_relations_bulk(operations, dry_run=True)` → `POST /relations/bulk`; `create_diagram(name, drawio_xml, …, dry_run=True)` → `POST /diagrams`; `import_bpmn(business_process_name, bpmn_xml, …, dry_run=True)` → find-or-create `BusinessProcess` card via `/cards/bulk-create` then `PUT /bpm/processes/{id}/diagram`. **Dry-run by default**: every write tool defaults to `dry_run=True`, which runs every validator and resolver server-side then rolls the transaction back so the agent can show the user a preview before committing. The backend's bulk endpoints (`/cards/bulk-create`, `/relations/bulk`, `/bpm/processes/{id}/diagram`) carry the matching `dry_run: bool = False` request flag; `event_bus.publish` calls and side-effect emitters in those handlers are gated on `not dry_run` so a preview never leaks events. Adding more mutating tools warrants careful security review.
-- **All data access respects RBAC**: The user's JWT is passed through to the backend API, so permission checks are enforced server-side. Write tools require the same permissions as the underlying REST routes — `inventory.create`, `relations.manage`, `diagrams.manage`, `bpm.edit`.
-- **Write-tool guardrails.** Defense in depth so an LLM mishap can't cause mass damage. (a) Per-call size caps on the MCP path — defaults `MCP_MAX_CARDS_PER_CALL=200`, `MCP_MAX_RELATIONS_PER_CALL=500`. The underlying backend bulk endpoints still accept up to 2000/5000 for the legitimate Excel-importer UI, but the MCP tool wrappers reject larger payloads before forwarding. (b) `upsert_relations_bulk` refuses `action: "delete"` ops by default — relations should be removed from the web UI for an auditable trail; flip `MCP_ALLOW_RELATION_DELETE=true` only when an operator explicitly opts in. (c) Kill switch — `MCP_WRITES_ENABLED=false` disables all 5 write tools without a code redeploy; read tools keep working. (d) Audit origin — the MCP server sends `X-Turbo-EA-Origin: mcp` on every backend call; the `capture_request_origin` middleware in `app.main` mirrors it into the `request_origin` contextvar that `event_bus.publish` stamps into the event data payload (`{"origin": "mcp"}`) so admins can filter MCP-driven writes out of the timeline. Header values are whitelisted to `{mcp, web, api}` — any other value is dropped. (e) The toolset deliberately omits card delete / archive / bulk-update; any future MCP write tool that crosses that line needs an RFC discussion first.
-- **Mutation batches.** Every MCP write call opens a `mutation_batches` row (`POST /mutation-batches`) before any writes, threads the resulting `batch_id` through every subsequent backend call via the `X-Turbo-EA-Batch` header, and closes the batch on success (`POST /mutation-batches/{id}/commit`). The same middleware that captures `X-Turbo-EA-Origin` mirrors the batch id into the `request_batch_id` contextvar so `event_bus.publish` stamps every event emitted during the request with that id — admins (or the `get_change_history` MCP tool) can then reconstruct the full per-event diff of a single batch from one id. Commits above `MCP_BATCH_CONFIRMATION_THRESHOLD` (default 20 rows) must echo back a one-shot `confirm_token` issued by the prior dry-run; the token has a 15-minute TTL. The MCP wrapper enforces the gate at the agent edge; the backend enforces it again on `POST /mutation-batches/{id}/commit`. The wrapper helper lives in `mcp-server/turbo_ea_mcp/batches.py`; the standardised mutation pattern is documented on its `mutation_batch` async-context-manager. **All 31 MCP tools carry `ToolAnnotations`** (`readOnlyHint` / `destructiveHint` / `idempotentHint`) so connectors can surface destructiveness in their UI.
+- **Read tools** (30, across eight clusters). **Cards & metamodel**: `search_cards`, `get_card`, `get_card_relations`, `get_card_hierarchy`, `list_card_types`, `get_relation_types`, `resolve_card_refs` (name-to-UUID pre-check), `analyze_impact` (dependency blast-radius for a proposed change). **Dashboards**: `get_dashboard`, `get_landscape`. **GRC (Risk Register)**: `list_risks`, `get_risk`, `get_risk_metrics`, `get_card_risks`. **GRC (Compliance)**: `list_compliance_findings`, `get_compliance_overview`. **Governance & Delivery**: `list_principles`, `list_adrs`, `get_adr`, `list_soaws`. **Reports**: `get_portfolio_report`, `get_cost_treemap`, `get_capability_heatmap`, `get_data_quality_report`. **Card context**: `get_card_stakeholders`, `get_card_comments`, `get_card_documents`. **Diagrams**: `list_diagrams`, `get_diagram`. (`resolve_card_refs` carries a read annotation — it resolves only, it never writes.)
+- **Audit & change history** (1, read). `get_change_history(batch_id?, actor_user_id?, tool_name?, origin?, limit?)` surfaces the mutation-batch ledger so agents and admins can reconstruct exactly what a previous MCP commit changed from a single id. Wraps `GET /mutation-batches` and `GET /mutation-batches/{id}/events`.
+- **Write tools** (17, annotated additive or destructive). **Additive** (13, `_WRITE_ADDITIVE_ANNOT`): `transition_card_lifecycle`, `create_risks`, `update_risks`, `add_card_comment`, `create_soaw`, `assign_stakeholders`, `update_cards_bulk`, `create_adr`, `update_adr`, `sign_adr`, `create_cards_bulk`, `create_diagram`, `import_bpmn`. **Destructive** (4, `_WRITE_DESTRUCTIVE_ANNOT`): `rollback_batch`, `update_diagram`, `archive_cards`, `upsert_relations_bulk`. The artifact-import subset (`create_cards_bulk` → `POST /cards/bulk-create`; `upsert_relations_bulk` → `POST /relations/bulk`; `create_diagram` → `POST /diagrams`; `import_bpmn` → find-or-create `BusinessProcess` then `PUT /bpm/processes/{id}/diagram`) lands structured rows the agent has read from its own context (spreadsheets, BPMN XML, DrawIO XML, PDFs, images). **Dry-run by default**: every mutating tool defaults to `dry_run=True`, which runs every validator and resolver server-side then rolls the transaction back so the agent can show the user a preview before committing. The backend's mutating endpoints carry the matching `dry_run: bool = False` request flag; `event_bus.publish` calls and side-effect emitters are gated on `not dry_run` so a preview never leaks events. Adding more mutating tools warrants careful security review.
+- **All data access respects RBAC**: The user's JWT is passed through to the backend API, so permission checks are enforced server-side. Write tools require the same permissions as the underlying REST routes — e.g. `inventory.create` / `inventory.edit` / `inventory.archive`, `relations.manage`, `diagrams.manage`, `bpm.edit`, `risks.manage`, `comments.create`, `stakeholders.manage`, `soaw.create`, `adr.create` / `adr.sign`.
+- **Write-tool guardrails.** Defense in depth so an LLM mishap can't cause mass damage. (a) Per-call size caps on the MCP path — defaults `MCP_MAX_CARDS_PER_CALL=200`, `MCP_MAX_RELATIONS_PER_CALL=500`. The underlying backend bulk endpoints still accept up to 2000/5000 for the legitimate Excel-importer UI, but the MCP tool wrappers reject larger payloads before forwarding. (b) `upsert_relations_bulk` refuses `action: "delete"` ops by default — relations should be removed from the web UI for an auditable trail; flip `MCP_ALLOW_RELATION_DELETE=true` only when an operator explicitly opts in. (c) Kill switch — `MCP_WRITES_ENABLED=false` disables all 17 write tools without a code redeploy; read tools keep working. (d) Audit origin — the MCP server sends `X-Turbo-EA-Origin: mcp` on every backend call; the `capture_request_origin` middleware in `app.main` mirrors it into the `request_origin` contextvar that `event_bus.publish` stamps into the event data payload (`{"origin": "mcp"}`) so admins can filter MCP-driven writes out of the timeline. Header values are whitelisted to `{mcp, web, api}` — any other value is dropped. (e) The toolset deliberately omits **hard card delete** (permanent deletion). Bulk-update and archive *are* exposed (`update_cards_bulk`, `archive_cards`) but archive is recoverable (soft-delete with a 30-day restore window) and both are annotated/dry-run-gated; any future MCP tool that performs an *irreversible* mutation (hard delete, force-purge) needs an RFC discussion first.
+- **Mutation batches.** Every MCP write call opens a `mutation_batches` row (`POST /mutation-batches`) before any writes, threads the resulting `batch_id` through every subsequent backend call via the `X-Turbo-EA-Batch` header, and closes the batch on success (`POST /mutation-batches/{id}/commit`). The same middleware that captures `X-Turbo-EA-Origin` mirrors the batch id into the `request_batch_id` contextvar so `event_bus.publish` stamps every event emitted during the request with that id — admins (or the `get_change_history` MCP tool) can then reconstruct the full per-event diff of a single batch from one id. Commits above `MCP_BATCH_CONFIRMATION_THRESHOLD` (default 20 rows) must echo back a one-shot `confirm_token` issued by the prior dry-run; the token has a 15-minute TTL. The MCP wrapper enforces the gate at the agent edge; the backend enforces it again on `POST /mutation-batches/{id}/commit`. The wrapper helper lives in `mcp-server/turbo_ea_mcp/batches.py`; the standardised mutation pattern is documented on its `mutation_batch` async-context-manager. **All 47 MCP tools carry `ToolAnnotations`** (`readOnlyHint` / `destructiveHint` / `idempotentHint`) so connectors can surface destructiveness in their UI.
 - **Config** is in `mcp-server/turbo_ea_mcp/config.py` — reads from env vars (`TURBO_EA_URL`, `TURBO_EA_PUBLIC_URL`, `MCP_PUBLIC_URL`, `MCP_PORT`, plus the six guardrail vars `MCP_WRITES_ENABLED`, `MCP_MAX_CARDS_PER_CALL`, `MCP_MAX_RELATIONS_PER_CALL`, `MCP_ALLOW_RELATION_DELETE`, `MCP_BATCH_CONFIRMATION_THRESHOLD`, `MCP_REQUIRE_DRYRUN_FIRST`).
 - **Tests** live in `mcp-server/tests/` and use `pytest` + `pytest-asyncio`. Run with `cd mcp-server && pip install -e ".[dev]" && pytest`.
 - The MCP server shares the `/VERSION` file with backend/frontend for version consistency.
@@ -139,11 +139,12 @@ To add an Ardoq / HOPEX / BiZZdesign / etc. adapter, the only surface area is a 
 - When nesting MUI Dialogs, use `disableRestoreFocus` on inner dialogs.
 - **Design tokens**: All colors, spacing aliases, icon sizes, and typography defaults live in `frontend/src/theme/tokens.ts` (re-exported from `frontend/src/theme/index.ts`). Never hardcode hex codes — import the named token (`STATUS_COLORS.success`, `SEVERITY_COLORS.high`, `LAYER_COLORS["Application & Data"]`, etc.). See [`frontend/UI_GUIDELINES.md`](frontend/UI_GUIDELINES.md) for the full design system, layout patterns, and do's/don'ts.
 - **Dependency diagrams — Layered Dependency View (LDV)**: All dependency visualizations (Dependencies Report, Card Detail dependency section, TurboLens Architect target architecture) use Turbo EA's house notation, the **Layered Dependency View**. Cards are grouped into the four EA layers (Strategy & Transformation → Business Architecture → Application & Data → Technical Architecture) as swim lanes; nodes are colored by card type; edges follow metamodel `relation_type` direction with the forward label; proposed/uncommitted cards have a dashed border + green "NEW" badge. Inspired by ArchiMate's layering and the C4 Model's "good defaults" philosophy, but distinct from both — do **not** describe it as "C4" in user-facing strings or documentation. The renderer is `frontend/src/features/reports/C4DiagramView.tsx` + `c4Layout.ts` (file/symbol names retained for compatibility); reuse it for any new dependency view. See `frontend/UI_GUIDELINES.md` § 3.10 for the full spec.
+- **DrawIO card shapes carry the card-type icon.** Cards inserted onto a DrawIO diagram (`frontend/src/features/diagrams/drawio-shapes.ts`) render their metamodel icon as a white glyph in the top-left corner via a `shape=label;image=...` style — baked into the single cell so it drags/exports with the shape (no child cells/overlays). The icon is a **vector SVG data-URI**, not the Material Symbols font, because font glyphs can't be reliably rasterised into images (the DrawIO iframe has no access to the app webfont — see `features/reports/reportExport.ts`). Path data lives in the **generated, committed** `frontend/src/features/diagrams/iconPaths.ts`, built from the curated picker set (`src/components/iconCatalog.ts`) by `npm run gen:diagram-icons` (sources: `@material-symbols/svg-400` + `@mui/icons-material` fallback for legacy names; both devDeps). Regenerate and commit `iconPaths.ts` when you add icon names to the catalogue — there is no pre-commit hook. The SVG URI is `encodeURIComponent`-encoded so it has no raw `;`/`=` and survives mxGraph's `;`/`=`-delimited style parser and the view-recolour helpers' `split(";")`.
 
 ### Internationalization (i18n)
 - **All user-facing strings must use translation keys**, never hardcoded English text. Use `useTranslation()` from `react-i18next` with the appropriate namespace.
-- **12 namespaces**: `common`, `auth`, `nav`, `inventory`, `cards`, `reports`, `admin`, `bpm`, `diagrams`, `delivery`, `notifications`, `validation`. Use the namespace that matches the feature area.
-- **8 supported locales**: `en` (English, baseline), `de` (German), `fr` (French), `es` (Spanish), `it` (Italian), `pt` (Portuguese), `zh` (Chinese Simplified), `ru` (Russian).
+- **14 namespaces**: `common`, `auth`, `nav`, `inventory`, `cards`, `reports`, `admin`, `bpm`, `ppm`, `diagrams`, `delivery`, `grc`, `notifications`, `validation`. Use the namespace that matches the feature area.
+- **9 supported locales**: `en` (English, baseline), `de` (German), `fr` (French), `es` (Spanish), `it` (Italian), `pt` (Portuguese), `zh` (Chinese Simplified), `ru` (Russian), `da` (Danish).
 - **English is the source of truth**. All keys must exist in `frontend/src/i18n/locales/en/{namespace}.json` first. The i18n config uses `fallbackLng: "en"` and `returnEmptyString: false`, so missing or empty translations gracefully fall back to English.
 - **Interpolation**: Use `{{variable}}` syntax for dynamic values (e.g., `"Selected {{count}} cards"`). Preserve these placeholders exactly when translating.
 - **Plurals**: i18next uses `_one` / `_other` suffixes (e.g., `"count_one": "{{count}} item"`, `"count_other": "{{count}} items"`). All locales need both forms.
@@ -152,22 +153,32 @@ To add an Ardoq / HOPEX / BiZZdesign / etc. adapter, the only surface area is a 
 
 #### Adding a New Language
 
-1. **Create locale files**: Copy `frontend/src/i18n/locales/en/` to `frontend/src/i18n/locales/{code}/` (use ISO 639-1 code). Translate all values; leave keys unchanged.
-2. **Register in i18n config** (`frontend/src/i18n/index.ts`):
-   - Add imports for all 12 namespace files
-   - Add the locale to the `resources` object in `i18n.init()`
-   - Add the code to `SUPPORTED_LOCALES` array
-   - Add a display label to `LOCALE_LABELS`
-3. **Add metamodel translations**: In `backend/app/services/seed.py`, add entries for the new locale in the `translations` dict of each card type and relation type definition.
-4. **Backend locale column** (`users.locale`): The Alembic migration already stores locale as a free-form string, so no migration is needed.
-5. **Validate**: Run `python3 -c "import json, glob; [json.load(open(f)) for f in glob.glob('src/i18n/locales/{code}/*.json')]"` to check JSON validity. Then run `npm run build` and `npm run test:run`.
+The locale code is the ISO 639-1 two-letter code throughout (`da`, not `da-DK`). The recipe touches code in three layers (frontend, backend, docs) plus a one-shot data migration. PR [#623](https://github.com/vincentmakes/turbo-ea/pull/623) (Danish) is the canonical worked example.
+
+1. **Frontend locale files**: copy `frontend/src/i18n/locales/en/` to `frontend/src/i18n/locales/{code}/` and translate the values in all 14 JSON files. Keys, placeholders, and `_one`/`_other` plural variants must match the English source exactly — verify with the JSON-parity check below.
+2. **Frontend i18n config** (`frontend/src/i18n/index.ts`): add imports for all 14 namespace files, extend the `resources` object, append the code to the `SUPPORTED_LOCALES` tuple, and add a display label to `LOCALE_LABELS`. The `SupportedLocale` type updates automatically.
+3. **Metamodel translations** (`backend/app/services/seed.py`): every `translations` dict on card types, subtypes, fields, sections, options, and relation types (label + reverse_label) needs the new locale. A Python regex pass that walks every leaf `"de":` dict and injects the matching value before the closing brace works well — see PR #623's `/tmp/add_da_seed.py` helper for the pattern.
+4. **Backend allow-lists** — extend the hardcoded `SUPPORTED_LOCALES` in **both** places: `backend/app/api/v1/settings.py` (governs the `/settings/enabled-locales` validator and the `/settings/bootstrap` fallback) and `backend/app/api/v1/users.py` (governs the `users.locale` write validator). Keeping them in sync is enforced by convention only — there is no shared constant today.
+5. **Test fixtures** — bump the hardcoded locale lists in `backend/tests/services/test_i18n_seed.py` (metamodel translation completeness check) and `frontend/src/i18n/i18n.test.ts` (placeholder/plural parity check). Both are pinned arrays, not imports, so they will not pick up the new locale automatically.
+6. **MkDocs config** (`mkdocs.yml`) — **two places**: (a) a new language block under `plugins.i18n.languages` with `locale`, `name`, `build: true`, and a full `nav_translations` map mirroring the existing locales; (b) a matching entry in `theme.alternate` (the header dropdown). Omitting `theme.alternate` builds the `/{code}/` site but leaves users no way to switch into it from the UI. Add the code to `plugins.search.lang` as well — `lunr-languages` supports `da` and the major locales out of the box.
+7. **Backend `User.locale`**: no migration needed — the column is `String(10)` with no enum constraint.
+8. **Backfill existing installs**: an admin who has touched **Admin → Settings → Languages** at least once has the full locale list persisted as `app_settings.general_settings.enabledLocales` (JSONB). That stored list will not pick up the new locale on its own, so the picker hides it even though the constant exposes it. Ship a small Alembic migration that walks the singleton `app_settings` row and appends the new locale if missing. The canonical implementation is `backend/alembic/versions/099_backfill_danish_enabled_locale.py` — Python-side fetch-mutate-update with a `CAST(:s AS jsonb)` write. Don't use a single SQL `UPDATE … jsonb_set(…) WHERE general_settings ? '...' AND … @> …`; the `?` JSONB key-existence operator interacts badly with SQLAlchemy's `text()` named-parameter scanner and silently rolls back in the migration runner.
+9. **Docs translations**: create `.{code}.md` siblings for every English `.md` under `docs/` (top-level index, `getting-started/`, `beginners-guide/`, `guide/`, `admin/`, `reference/`). The site builds without them — mkdocs-static-i18n falls back to English per page — but the language picker existing without translated pages confuses users.
+10. **Validate**:
+    - `python3 -c "import json, glob; [json.load(open(f)) for f in glob.glob('frontend/src/i18n/locales/{code}/*.json')]"` — JSON validity.
+    - A second parity script (en keys == new-locale keys, en placeholders == new-locale placeholders) catches the common omissions.
+    - `cd backend && ruff format . && ruff check . && python -m pytest tests/services/test_i18n_seed.py -q`.
+    - `cd frontend && npm run build && npm run test:run`.
+    - `mkdocs build --strict` (catches broken links in the new docs).
+
+Screenshots can stay in `docs/assets/img/en/` and the new docs can reference `../assets/img/en/...` — translating UI screenshots is a separate, optional pass.
 
 #### Translation Checklist for Code Changes
 
 Every change that introduces user-visible content must include translations. Before marking a task as complete, verify:
 
-- [ ] **New UI strings**: Added translation keys to `frontend/src/i18n/locales/en/{namespace}.json` and all 7 non-English locale files (`de`, `fr`, `es`, `it`, `pt`, `zh`, `ru`). Never hardcode English text in components.
-- [ ] **New metamodel content** (card types, subtypes, fields, options, sections, relation types): Added `"translations"` dicts with all 7 non-English locales in `backend/app/services/seed.py`.
+- [ ] **New UI strings**: Added translation keys to `frontend/src/i18n/locales/en/{namespace}.json` and all 8 non-English locale files (`de`, `fr`, `es`, `it`, `pt`, `zh`, `ru`, `da`). Never hardcode English text in components.
+- [ ] **New metamodel content** (card types, subtypes, fields, options, sections, relation types): Added `"translations"` dicts with all 8 non-English locales in `backend/app/services/seed.py`.
 - [ ] **New select options** (in seed data or reusable option arrays): Each option object includes a `"translations"` dict.
 - [ ] **New field labels**: Each field in `fields_schema` includes a `"translations"` dict.
 - [ ] **New section names**: Each section in `fields_schema` includes a `"translations"` dict.
@@ -249,7 +260,7 @@ Files use **suffix-based** i18n: `page.md` is English (default), `page.es.md` is
 
 | Change Type | Required Doc Update |
 |-------------|-------------------|
-| **New feature** | Add or update the relevant guide/admin page in **all supported languages** (currently `en` + locale suffixes for `es`, `de`, `fr`, `it`, `pt`, `zh`, `ru`). |
+| **New feature** | Add or update the relevant guide/admin page in **all supported languages** (currently `en` + locale suffixes for `es`, `de`, `fr`, `it`, `pt`, `zh`, `ru`, `da`). |
 | **UI change** | Replace affected screenshots in **all locale folders** under `docs/assets/img/`. |
 | **New admin setting** | Update the appropriate admin page (e.g., `docs/admin/settings.md`). |
 | **New API endpoint** | Document in the relevant guide page if user-facing. |
@@ -381,7 +392,7 @@ The codebase uses **"cards"** throughout (models, routes, UI). Earlier documenta
 
 ```
 turbo-ea/
-├── VERSION                            # SemVer "0.5.0" (single source of truth)
+├── VERSION                            # SemVer (single source of truth, e.g. "1.36.0")
 ├── .dockerignore                      # Root-level (both services use root context)
 ├── docker-compose.yml                 # Full stack including PostgreSQL + edge nginx
 ├── dev/
@@ -397,7 +408,7 @@ turbo-ea/
 │   │   ├── api/
 │   │   │   ├── deps.py                # Auth dependencies (get_current_user, require_permission)
 │   │   │   └── v1/
-│   │   │       ├── router.py          # Mounts all 46 API routers
+│   │   │       ├── router.py          # Mounts all API routers (48 include_router calls)
 │   │   │       ├── auth.py            # /auth (login, register, me, SSO, set-password)
 │   │   │       ├── cards.py           # /cards CRUD + hierarchy + approval status + CSV export
 │   │   │       ├── metamodel.py       # /metamodel (types + relation types + field/section usage)
@@ -438,13 +449,15 @@ turbo-ea/
 │   │   │       ├── capability_catalogue.py # /capability-catalogue (industry catalogue)
 │   │   │       ├── principles_catalogue.py # /principles-catalogue (curated reference set)
 │   │   │       ├── process_catalogue.py    # /process-catalogue (industry process reference)
-│   │   │       └── value_stream_catalogue.py # /value-stream-catalogue (value stream reference)
+│   │   │       ├── value_stream_catalogue.py # /value-stream-catalogue (value stream reference)
+│   │   │       ├── migration.py        # /migration (platform-migration importer — LeanIX etc.)
+│   │   │       └── mutation_batches.py # /mutation-batches (MCP write ledger + per-event diff)
 │   │   ├── core/
 │   │   │   ├── security.py            # JWT creation/validation (PyJWT HS256), bcrypt
 │   │   │   ├── permissions.py         # Permission key registry (single source of truth)
 │   │   │   ├── encryption.py          # Fernet symmetric encryption for DB secrets
 │   │   │   └── rate_limit.py          # slowapi rate limiter instance
-│   │   ├── models/                    # SQLAlchemy ORM models (47 files, see Database section)
+│   │   ├── models/                    # SQLAlchemy ORM models (49 files, see Database section)
 │   │   ├── schemas/                   # Pydantic request/response models
 │   │   │   ├── auth.py                # Auth schemas
 │   │   │   ├── card.py                # Card schemas
@@ -461,7 +474,7 @@ turbo-ea/
 │   │   │   ├── bpmn_parser.py         # BPMN 2.0 XML → element extraction
 │   │   │   ├── element_relation_sync.py # Link BPMN elements to EA cards
 │   │   │   ├── servicenow_service.py  # ServiceNow API client + sync
-│   │   │   ├── seed.py                # Default metamodel (14 types, 30+ relations)
+│   │   │   ├── seed.py                # Default metamodel (13 types, 30+ relations)
 │   │   │   ├── seed_demo.py           # NexaTech Industries demo dataset
 │   │   │   ├── seed_demo_bpm.py       # Demo BPM processes
 │   │   │   ├── seed_demo_ppm.py       # Demo PPM data (status reports, WBS, tasks, budgets, costs, risks)
@@ -470,7 +483,7 @@ turbo-ea/
 │   │   ├── config.py                  # Settings from env vars + APP_VERSION
 │   │   ├── database.py                # Async engine + session factory
 │   │   └── main.py                    # FastAPI app, lifespan (migrations + seed + purge loop + AI auto-config)
-│   ├── alembic/                       # Database migrations (89 versions)
+│   ├── alembic/                       # Database migrations (100 versions)
 │   ├── tests/
 │   └── pyproject.toml
 │
@@ -746,7 +759,7 @@ All tables use UUID primary keys and `created_at`/`updated_at` timestamps (from 
 
 | Table | Model | Purpose |
 |-------|-------|---------|
-| `users` | `User` | Email, display_name, password_hash, role_key (FK to roles), is_active, SSO fields |
+| `users` | `User` | Email, display_name, password_hash, role_key (FK to roles), is_active, SSO fields, password_reset_token / password_reset_expires_at (local-account forgot-password flow) |
 | `card_types` | `CardType` | Metamodel: types with key, label, icon, color, category, subtypes (JSONB), fields_schema (JSONB), section_config (JSONB), stakeholder_roles (JSONB), has_hierarchy, built_in, is_hidden, sort_order |
 | `relation_types` | `RelationType` | Metamodel: allowed relations between types with label, reverse_label, cardinality, attributes_schema (JSONB) |
 | `cards` | `Card` | The core entity. Type, subtype, name, description, parent_id (hierarchy), lifecycle (JSONB), attributes (JSONB), status, approval_status, data_quality (float 0-100), archived_at |
@@ -780,6 +793,7 @@ All tables use UUID primary keys and `created_at`/`updated_at` timestamps (from 
 | `ppm_tasks` | `PpmTask` | Work items: status (todo/in_progress/done/blocked), priority, assignee, tags (JSONB), WBS link |
 | `ppm_task_comments` | `PpmTaskComment` | Comments on PPM tasks |
 | `ppm_wbs` | `PpmWbs` | Work Breakdown Structure: self-referential hierarchy, completion (auto-rolled up), milestones |
+| `ppm_dependencies` | `PpmDependency` | Finish-to-start schedule dependency between two PPM rows (task and/or WBS item), used by the Gantt view |
 
 ### Calculation Tables
 
@@ -816,7 +830,18 @@ All tables use UUID primary keys and `created_at`/`updated_at` timestamps (from 
 | `user_favorites` | `UserFavorite` | Per-user favorited cards (M:N user × card) |
 | `risks` | `Risk` | EA Risk Register entries (TOGAF Phase G) — see Risk Register section |
 | `risk_cards` | `RiskCard` | M:N junction between risks and affected cards |
+| `risk_mitigation_tasks` / `risk_mitigation_task_occurrences` | `RiskMitigationTask` / `RiskMitigationTaskOccurrence` | Task-driven mitigation with recurring occurrences — see Risk Register section |
+| `compliance_regulations` | `ComplianceRegulation` | Admin-managed regulation catalogue driving the GRC Compliance scanner |
 | `turbolens_*` | TurboLens models | Vendor analysis, duplicates, modernizations, analysis runs, compliance findings — see TurboLens section |
+| `mutation_batches` | `MutationBatch` | MCP write ledger — every MCP write call opens a batch; each emitted row in the `events` table is stamped with its `batch_id` (see MCP section) |
+
+### Migration (Platform Import) Tables
+
+| Table | Model | Purpose |
+|-------|-------|---------|
+| `migrations` | `Migration` | One row per uploaded third-party EA export (LeanIX, …), with `source_type` discriminator |
+| `staged_records` | `StagedRecord` | Source-neutral staged entities/relations/etc. awaiting apply |
+| `migration_identity_map` | `IdentityMap` | External-id → TEA-id map, keyed `(source_id, entity_kind, source_type)` |
 
 ### ServiceNow Integration Tables
 
@@ -831,7 +856,7 @@ All tables use UUID primary keys and `created_at`/`updated_at` timestamps (from 
 
 ### Migrations
 
-Located in `backend/alembic/versions/` (89 migration files, sequentially numbered `001_` through `089_`). The app auto-runs Alembic on startup:
+Located in `backend/alembic/versions/` (100 migration files, sequentially numbered `001_` through `100_`). The app auto-runs Alembic on startup:
 - Fresh DB: `create_all` + stamp head
 - Existing DB without Alembic: stamp head
 - Normal: `upgrade head` (run pending migrations)
@@ -856,6 +881,9 @@ Base path: `/api/v1`. All endpoints except auth and public portals require `Auth
 | GET | `/auth/sso/config` | No | SSO configuration |
 | POST | `/auth/sso/callback` | No | SSO OAuth callback |
 | POST | `/auth/set-password` | No | Set password via invitation token |
+| POST | `/auth/forgot-password` | No | Request a password-reset email (local accounts only; rate-limited) |
+| GET | `/auth/validate-reset-token` | No | Check whether a password-reset token is valid and unexpired |
+| POST | `/auth/reset-password` | No | Set a new password using a valid reset token |
 
 ### Metamodel (`/metamodel`)
 
@@ -1259,7 +1287,7 @@ Each type has an optional `section_config` (JSONB) controlling layout:
 
 Single source of truth for all valid permission keys. Two categories:
 
-**App-level permissions** (27 groups, 69 keys): `inventory.*`, `relations.*`, `stakeholders.*`, `comments.*`, `documents.*`, `diagrams.*`, `bpm.*`, `ppm.*`, `reports.*`, `surveys.*`, `soaw.*`, `adr.*`, `tags.*`, `bookmarks.*`, `saved_reports.*`, `eol.*`, `web_portals.*`, `notifications.*`, `servicenow.*`, `turbolens.*`, `compliance.*` (view + manage for the GRC Compliance scanner — the CVE half of the old "Security & Compliance" tab was removed), `risks.*` (view + manage for the EA Risk Register), `grc.*`, `costs.*`, `ai.*`, `users.*`, `admin.*`
+**App-level permissions** (27 groups, 70 keys): `inventory.*`, `relations.*`, `stakeholders.*`, `comments.*`, `documents.*`, `diagrams.*`, `bpm.*`, `ppm.*`, `reports.*`, `surveys.*`, `soaw.*`, `adr.*`, `tags.*`, `bookmarks.*`, `saved_reports.*`, `eol.*`, `web_portals.*`, `notifications.*`, `servicenow.*`, `turbolens.*`, `compliance.*` (view + manage for the GRC Compliance scanner — the CVE half of the old "Security & Compliance" tab was removed), `risks.*` (view + manage for the EA Risk Register), `grc.*`, `costs.*`, `ai.*`, `users.*`, `admin.*`
 
 **Card-level permissions** (15 keys): `card.view`, `card.edit`, `card.archive`, `card.delete`, `card.approval_status`, `card.manage_stakeholders`, `card.manage_relations`, `card.manage_documents`, `card.manage_comments`, `card.create_comments`, `card.bpm_edit`, `card.bpm_manage_drafts`, `card.bpm_approve`, `card.manage_adr_links`, `card.manage_diagram_links`
 
@@ -1286,6 +1314,16 @@ has_access = await PermissionService.check_permission(db, user, "bpm.edit")
 | BPM Admin | `bpm_admin` | No | All BPM permissions + full inventory, no admin.* |
 | Member | `member` | No | Full inventory + BPM edit (no approve), no admin.* |
 | Viewer | `viewer` | No | View-only across all domains, can respond to surveys |
+
+### Role Impersonation
+
+The **View as role…** entry in the user menu (gated on `admin.impersonate`) lets an admin temporarily act as another role to verify what non-admin users see. The model is intentionally simple and server-enforced:
+
+- **JWT-claim only.** `POST /auth/impersonate {role}` issues a fresh JWT carrying an `impersonated_role` claim; `POST /auth/stop-impersonating` issues one without it. The `users.role` column is never modified — impersonation is transient session state.
+- **Effective role lives in a contextvar.** A middleware in `app/main.py` decodes the JWT once per request and stashes `(impersonator_user_id, impersonated_role)` on `request_impersonation` (defined in `app/services/event_bus.py` alongside `request_origin` / `request_batch_id`). `PermissionService._effective_role(user)` reads it and returns the impersonated role for app-level permission checks. **Stakeholder permissions are not stripped** — they're per-card grants tied to `user.id`, so the impersonating admin keeps their own stakeholder access (an admin impersonating "member" still sees what *they personally* would see as a member, not some platonic member ideal).
+- **Sensitive endpoints stay strict.** No "real-admin escape hatch" — while impersonating, `admin.users` / `admin.settings` / etc. all evaluate against the impersonated role's permission set, so the impersonating admin loses those powers until they stop. The whole point of the feature is verification; admin work requires stopping the session first.
+- **Admin can't be impersonated.** `POST /auth/impersonate` hard-rejects `role: "admin"` so a custom support role with `admin.impersonate` can't step up to the wildcard.
+- **Audit fan-out.** `event_bus.publish()` stamps `impersonator_user_id` and `impersonated_role` onto every event emitted while impersonation is active. Reviewers can later answer "who, really, performed this action?" from the event payload alone.
 
 ---
 

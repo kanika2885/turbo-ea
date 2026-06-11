@@ -45,7 +45,7 @@ Campos definem os atributos personalizados disponíveis nos cards deste tipo. Ca
 | **Tipo** | text, multiline_text, number, cost, boolean, date, url, single_select ou multiple_select |
 | **Opções** | Para campos de seleção: as escolhas disponíveis com rótulos e cores opcionais |
 | **Obrigatório** | Se o campo deve ser preenchido para pontuação de qualidade dos dados |
-| **Peso** | Quanto este campo contribui para a pontuação de qualidade dos dados (0-10) |
+| **Qualidade dos dados** | A contribuição de cada campo para a pontuação é gerida no painel **Qualidade dos dados** (ver abaixo) |
 | **Somente leitura** | Impede edição manual (útil para campos calculados) |
 
 Clique em **+ Adicionar Campo** para criar um novo campo, ou clique em um campo existente para editá-lo no **Diálogo de Editor de Campo**.
@@ -57,9 +57,26 @@ Campos são organizados em **seções** na página de detalhe do card. Você pod
 - Criar seções nomeadas para agrupar campos relacionados
 - Definir seções com layout de **1 coluna** ou **2 colunas**
 - Organizar campos em **grupos** dentro de uma seção (renderizados como sub-cabeçalhos recolhíveis)
-- Arrastar campos entre seções e reordená-los
+- Reordenar campos dentro de uma seção arrastando-os e mover um campo para outra seção pela ação **mover**
 
 O nome de seção especial `__description` adiciona campos à seção de Descrição da página de detalhe do card.
+
+#### Pontuação de qualidade dos dados
+
+A pontuação de **qualidade dos dados** de um card mede de forma ponderada o quão completo ele está. Cada fator que contribui — cada campo e quatro fatores integrados — é gerido em um único lugar: a aba **Qualidade dos dados** do editor de tipo de card. (O editor é organizado em abas — Geral, Relações, Papéis das partes interessadas e Qualidade dos dados — as traduções estão disponíveis no ícone do cabeçalho.)
+
+A importância de cada fator é definida com um controle deslizante simples de quatro níveis, que também mostra o número subjacente:
+
+- **Ignorar (0)** — excluído totalmente da pontuação.
+- **Normal (1)** — conta uma vez (padrão).
+- **Importante (2)** — conta o dobro.
+- **Crítico (3)** — conta o triplo.
+
+O painel lista os quatro **fatores integrados** — **Descrição**, **Ciclo de vida** (se alguma data de ciclo de vida estiver definida), **Relações obrigatórias** e **Etiquetas obrigatórias** — seguidos de cada campo agrupado pela sua seção, cada um com o mesmo controle deslizante. Por exemplo, defina o **Ciclo de vida** como *Ignorar* para um tipo cujos cards legitimamente nunca têm datas, para que não sejam penalizados.
+
+Uma barra de **composição da pontuação** no topo do painel mostra a parcela de cada fator na pontuação máxima possível, para ver rapidamente quais fatores dominam. No layout do card da aba **Principal**, cada campo — e as seções integradas Descrição, Ciclo de vida e Relações — mostra um pequeno selo com o seu nível atual, para ver a ponderação sem sair dessa aba.
+
+Alterar qualquer importância recalcula imediatamente a pontuação de todos os cards existentes desse tipo. Os campos novos são *Normal* por padrão, portanto contam para a pontuação assim que você os adiciona.
 
 #### Subtipos (Sub-modelos)
 
@@ -191,3 +208,4 @@ Para cada tipo de card, a seção **Layout** no painel do tipo controla como a p
 - **Visibilidade** — Oculte seções que não são relevantes para um tipo
 - **Expansão padrão** — Escolha se cada seção começa expandida ou recolhida
 - **Layout de colunas** — Defina 1 ou 2 colunas por seção personalizada
+- **Mover campos entre seções** — Usar a ação **mover** de um campo (ao lado dos botões de editar e excluir) para realocá-lo em outra seção, mantendo a sua configuração

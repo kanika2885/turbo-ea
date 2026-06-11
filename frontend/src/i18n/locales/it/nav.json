@@ -11,13 +11,13 @@
   "reports.matrix": "Matrice",
   "reports.dataQuality": "Qualità dei dati",
   "reports.endOfLife": "Fine vita",
-  "reports.eaDelivery": "EA Delivery",
+  "reports.eaDelivery": "Consegna EA",
   "reports.saved": "Report salvati",
   "reports.processMap": "Mappa dei processi",
   "bpm": "BPM",
   "ppm": "PPM",
   "diagrams": "Diagrammi",
-  "delivery": "EA Delivery",
+  "delivery": "Consegna EA",
   "grc": "GRC",
   "todos": "Attività",
   "admin": "Amministrazione",
@@ -49,5 +49,8 @@
   "userMenu.principlesCatalogue": "Catalogo dei principi",
   "userMenu.referenceCatalogues": "Cataloghi di riferimento",
   "userMenu.processCatalogue": "Catalogo dei processi",
-  "userMenu.valueStreamCatalogue": "Catalogo dei flussi di valore"
+  "userMenu.valueStreamCatalogue": "Catalogo dei flussi di valore",
+  "userMenu.viewAsRole": "Visualizza come ruolo…",
+  "impersonation.banner": "Visualizzazione come {{role}}",
+  "impersonation.stop": "Interrompi"
 }

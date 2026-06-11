@@ -5,6 +5,90 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.41.0] - 2026-06-01
+
+### Added
+- **Azure Hosted OpenAI as a first-class AI provider.** Admins can now select **Azure Hosted OpenAI** alongside Ollama, OpenAI-compatible, and Anthropic Claude in `/admin/settings?tab=ai`. Azure's distinctive shape — deployment name embedded in the URL, `api-key` header instead of `Authorization: Bearer`, mandatory `api-version` query parameter — is implemented as a dedicated dispatch branch in `call_llm()` rather than overloaded under the generic OpenAI flag. The payload matches `_call_openai_compatible` exactly (`temperature: 0.1`, `response_format: {"type": "json_object"}`) so suggestion quality stays consistent across providers. A new **API Version** field appears in the admin UI when Azure is selected, defaulting to `2025-01-01`. **Test Connection** does a 1-token probe call against the configured deployment (Azure has no `/models` endpoint) with friendly mapping for 401 (invalid key) and 404 (deployment not found). Strings translated across all 8 locales. Original work contributed by @kanika2885 in [#641](https://github.com/vincentmakes/turbo-ea/pull/641).
+
+## [1.40.0] - 2026-06-09
+
+### Added
+- **Card-type icons on diagram shapes.** Cards placed on a DrawIO diagram now show their card-type icon as a small white glyph in the top-left corner of the shape, in addition to the type colour. Following [#638](https://github.com/vincentmakes/turbo-ea/discussions/638), this gives a second, non-colour cue for a card's type — improving accessibility for colour-blind users. The icon is baked into the shape, so dragging, copying, or exporting it moves the icon with it. The icon set matches the metamodel icon picker, so custom card-type icons appear too. The icon is added to cards inserted from now on; cards already on an older diagram can be upgraded in one click with the new **Apply card-type icons** button in the diagram editor toolbar.
+
+## [1.39.1] - 2026-06-03
+
+### Security
+- **Updated `react-router-dom` to 7.16.0** to remediate three advisories affecting the bundled 7.13.0: a client-side XSS in the unstable RSC redirect API ([GHSA-8646-j5j9-6r62](https://github.com/advisories/GHSA-8646-j5j9-6r62), CVSS 8.0), an unauthenticated RCE via the vendored turbo-stream deserialiser ([GHSA-49rj-9fvp-4h2h](https://github.com/advisories/GHSA-49rj-9fvp-4h2h)), and a protocol-relative open redirect ([GHSA-2j2x-hqr9-3h42](https://github.com/advisories/GHSA-2j2x-hqr9-3h42)). The bump stays within the v7 line and is API-compatible.
+- **Patched transitive dev dependencies** `ws` ([GHSA-58qx-3vcg-4xpx](https://github.com/advisories/GHSA-58qx-3vcg-4xpx), uninitialized memory disclosure) and `brace-expansion` ([GHSA-f886-m6hf-6m8v](https://github.com/advisories/GHSA-f886-m6hf-6m8v), ReDoS), clearing all remaining `npm audit` findings (0 vulnerabilities).
+
+## [1.39.0] - 2026-06-03
+
+### Added
+- **Move fields between sections in the card layout editor.** Each field in a card type's layout now has a **move** action (next to edit and delete) that relocates it to any other section in one click, keeping its configuration. Previously fields could only be dragged within their own section, making it tedious to reorganise a type's layout (for example, moving fields into the new Application **Assessment** section).
+
+### Changed
+- **Application cards separate facts from assessments.** The Application card's attributes used to mix objective facts and subjective ratings in a single "Application Information" section. Following [#632](https://github.com/vincentmakes/turbo-ea/discussions/632), the four rating fields — Business Criticality, Functional Suitability, Technical Suitability, and TIME Model — now live in a dedicated **Assessment** section, leaving Hosting Type, Commercial Application, and Has AI Features in **Application Information** (Cost & Ownership is unchanged). This mirrors how Business Capability cards already split facts from their assessment. Existing installs are migrated automatically; admin-customised Application layouts are left untouched.
+
+## [1.38.0] - 2026-06-02
+
+### Added
+- **Tunable data quality.** The card-type editor is now organised into tabs — Main, Relations, Stakeholder roles, and Data quality (translations remain on the header icon). The new **Data quality** tab puts every factor that feeds the data-quality score in one place: each field plus the four built-in contributors (Description, Lifecycle, mandatory Relations, mandatory Tags). Each one has a simple four-tier importance slider that also shows the underlying number — **Ignore (0)** drops it from the score, **Normal (1)**, **Important (2)**, and **Critical (3)** make it count progressively more — replacing the old unlabeled per-field weight box. A score-composition bar shows each factor's share of the maximum at a glance, and field rows in the layout editor carry a small tier badge. You can, for example, set Lifecycle to *Ignore* so cards that legitimately have no dates aren't penalised. Changing any importance immediately re-scores every existing card of that type — no need to re-save each one.
+
+### Fixed
+- **New custom fields no longer silently ignored by data quality.** A field added to a card type used to default to a weight of 0, which quietly excluded it from the completeness score until an admin noticed the obscure weight box and bumped it. New fields now default to "Normal" and count toward data quality as expected.
+
+## [1.37.0] - 2026-06-02
+
+### Added
+- **Admin role impersonation.** Admins with the new `admin.impersonate` permission can now temporarily view the app as a different role (member, viewer, bpm_admin, or any custom role). Open the **View as role…** entry in the user menu, pick a role, and the entire UI + backend permission surface immediately behaves as if you had that role — no need to spin up a test account. A persistent yellow banner at the top of every page shows which role you're acting as and offers a one-click **Stop**. The impersonation lives in the JWT only — your real account is never modified — and every event emitted during the session is audit-stamped with your real user id and the impersonated role key, so reviewers can later answer "who, really, performed this action?".
+
+### Fixed
+- **Admin menu is now hidden from non-admin users.** Members and viewers were seeing the **Admin** dropdown in the top navigation even though they couldn't actually save changes — the underlying API calls were correctly rejected, but the menu chrome was confusing. The Settings entry was previously visible to anyone holding `eol.manage`, `web_portals.manage`, `servicenow.manage`, or `turbolens.manage`; it now requires `admin.settings` like the other admin entries, so the entire Admin section disappears for users without a genuine `admin.*` permission. Direct `/admin/*` URLs are also gated server-side-style at the route level — typing one into the address bar lands non-permitted users on an **Access denied** page instead of loading the admin screen.
+
+## [1.36.0] - 2026-05-29
+
+### Fixed
+- **Filled in missing UI translations across all languages.** A large backlog of interface strings — concentrated in the Card Detail archive/delete/restore dialogs, the Admin settings / SSO / ServiceNow / compliance screens, EA Delivery, reports, and BPM/PPM — had only ever been written in English and fell back to English in German, French, Spanish, Italian, Portuguese, Chinese, Russian, and Danish. All of these are now properly translated (~530 strings), so switching the interface language no longer leaves stray English labels. Brand names, acronyms, and standard/regulation names (e.g. GDPR, ISO 27001) are intentionally left untranslated.
+
+## [1.35.0] - 2026-05-29
+
+### Added
+- **Risk Register Excel import.** The Risk Register now has an **Import** button alongside Export. Download a starter `.xlsx` template, fill in one risk per row, and upload it to create risks in bulk. Owners are matched by email and affected cards by exact name on a best-effort basis (unmatched values are skipped with a non-blocking warning), and a server-side dry-run preview shows exactly what will be created — including any per-row errors and how many rows will be skipped — before anything is written. Rows whose reference already matches an existing risk are skipped (the importer never updates existing risks, so re-importing a previously exported register is idempotent); every other row creates a brand-new risk. Fulfills [#586](https://github.com/vincentmakes/turbo-ea/discussions/586).
+
+## [1.34.0] - 2026-05-29
+
+### Added
+- **Recurring todos on cards.** When adding a todo to a card you can now switch on "Repeats" and choose a cadence (every N days / weeks / months / years) — ideal for regular activities like "have this card reviewed every 6 months". Completing a recurring todo automatically spawns the next occurrence on the calendar-correct due date. Far-future occurrences stay quietly "scheduled" (hidden from your open list and the nav badge, no notification) until a configurable lead-time window opens, then surface as a normal todo; you can also activate one early. The Tasks page gains an **Upcoming** filter so you can always see your scheduled recurring pipeline. Reuses the recurrence engine built for risk mitigation tasks. Fulfills [#588](https://github.com/vincentmakes/turbo-ea/discussions/588).
+
+### Fixed
+- **Todo nav badge now counts only todos assigned to you.** Previously it also counted open todos you created for other people, inflating the number above what your Tasks list actually shows. The badge now matches the dashboard's open-todos list and the "Assigned to me" tab.
+
+## [1.33.0] - 2026-05-28
+
+### Added
+- **"New activity" dot on Card Detail tabs.** When you revisit a card, tabs whose data has changed since your first visit now carry a small dot next to the label, so you can tell at a glance whether Comments, Stakeholders, Resources, Risks, or the Card tab itself has anything new. The dot is suppressed on first-ever visits to a card (nothing is "new" if you've never looked before), suppressed for events you authored yourself (your own changes never dot themselves), and stays visible for the entire visit — including on the Card tab you land on — only clearing on the *next* visit after you've actually been there. Fully client-side — a per-card first-visit baseline and per-tab "last seen" timestamps live in `localStorage`, flushed on unmount / `beforeunload`, capped to the 200 most-recently-opened cards via LRU eviction — and re-uses the existing `GET /cards/{id}/history` endpoint without any backend or schema changes. The History tab itself is intentionally never dotted (it's the audit log of everything). Fulfills [#607](https://github.com/vincentmakes/turbo-ea/discussions/607).
+
+## [1.32.0] - 2026-05-28
+
+### Added
+- **Admin setting to disable card file uploads.** A new **File uploads** toggle in **Admin → Settings → Modules** lets administrators turn off the binary-file upload feature on cards for tenants that prefer to keep documents in an external DMS (SharePoint, Confluence, …) and link to them by URL. When disabled, the **Upload File** button and dialog disappear from the Card Detail → Resources tab and `POST /cards/{id}/file-attachments` returns HTTP 403; existing attachments stay visible and downloadable so admins can clean up, and URL document links continue to work unchanged. The flag ships **on** for existing installs and is stored in `app_settings.general_settings.fileUploadsEnabled`; exposed via `GET/PATCH /settings/file-uploads-enabled` and `GET /settings/bootstrap`.
+
+## [1.31.0] - 2026-05-28
+
+### Added
+- **Danish (Dansk) locale across UI, metamodel, and documentation.** Adds `da` as the ninth supported language. Frontend i18n carries Danish translations for all 14 namespaces (admin, auth, bpm, cards, common, delivery, diagrams, grc, inventory, nav, notifications, ppm, reports, validation); the built-in metamodel seed (`seed.py`) gets Danish strings on every card type, subtype, field, section, option, and relation type / reverse label; the backend's enabled-locales allow-list (`settings.py`) accepts `da`; and the MkDocs user manual builds a full `/da/` site with translated nav, glossary, getting-started, beginners-guide, guide/, admin/, and reference/ pages. Existing installs see Danish appear in the locale picker on next deploy without a backfill migration — the seed-only metamodel translations are additive and fall back to English for any drift. Screenshots remain English in this pass.
+
+## [1.30.6] - 2026-05-28
+
+### Fixed
+- **Inventory filter sidebar now shows card types added after the page was loaded.** Importing a snapshot via the migration importer (or any flow that creates a new card / relation type via the admin) landed the new rows in the backend metamodel but the in-memory snapshot cached by `useMetamodel` was never invalidated — so the Inventory page's filter sidebar (and CreateCardDialog, report axes, every other consumer) silently kept showing the old built-in list until the user did a hard browser refresh. `MigrationAdmin` now drops the cached snapshot via a new top-level `invalidateCache()` export on `useMetamodel`, and the hook broadcasts the fresh snapshot to every mounted consumer in the same tick — no remount required. The same broadcast retroactively improves `MetamodelAdmin`'s existing `refresh()` call (manually re-categorizing an imported type to a standard EA layer now also flows live).
+- **Migration importer no longer crashes when a source export contains a relation type whose native name exceeds 100 characters.** The bug surfaced as a `StringDataRightTruncationError` against `value too long for type character varying(100)` and aborted the whole import — first in the staging layer, then (once staging was fixed) in the apply layer. Three columns doubled as catch-alls for free-form source-derived type keys but were still sized for short TEA-controlled keys: `staged_records.card_type_key` (migration 097), and `relation_types.key` / `relation_types.label` / `relation_types.reverse_label` / `relations.type` (migration 098). All are now `TEXT`, mirroring the precedent set by migration 095 for `source_id`. Source-agnostic — every current and future migration adapter (LeanIX today; Ardoq, HOPEX, BiZZdesign, Avolution Abacus, …) inherits the headroom without touching adapter code. Card-type-key columns elsewhere stay at `VARCHAR(100)` because adapters always map source card types to short TEA-controlled keys via `TYPE_MAPPING`.
+
+## [1.30.5] - 2026-05-28
+
+### Fixed
+- **GRC → Decisions: Title field in the *Add new Decision* dialog no longer clears on every keystroke.** Opening the create-ADR dialog from the GRC Governance panel made it impossible to enter a title — each keystroke was immediately wiped. The dialog's reset-on-open `useEffect` had `preLinkedCards` in its dependency array, and `DecisionsPanel` (the only caller that doesn't pass that prop) hit the default `= []`, which produced a fresh array on every parent render. Each keystroke re-rendered the parent, the new `[]` looked like a changed dep, and the effect re-fired `setTitle("")`. The dep array now reads `[open]` only, so the reset fires once per open-transition as intended. Fixes [#618](https://github.com/vincentmakes/turbo-ea/issues/618).
+
 ## [1.30.4] - 2026-05-26
 
 ### Changed

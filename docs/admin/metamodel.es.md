@@ -45,7 +45,7 @@ Los campos definen los atributos personalizados disponibles en fichas de este ti
 | **Tipo** | texto, texto_multilínea, número, costo, booleano, fecha, url, selección_única o selección_múltiple |
 | **Opciones** | Para campos de selección: las opciones disponibles con etiquetas y colores opcionales |
 | **Requerido** | Si el campo debe completarse para la puntuación de calidad de datos |
-| **Peso** | Cuánto contribuye este campo a la puntuación de calidad de datos (0–10) |
+| **Calidad de datos** | La contribución de cada campo a la puntuación se gestiona en el panel **Calidad de datos** (ver más abajo) |
 | **Solo lectura** | Impide la edición manual (útil para campos calculados) |
 
 Haga clic en **+ Agregar Campo** para crear un nuevo campo, o haga clic en un campo existente para editarlo en el **Diálogo Editor de Campos**.
@@ -57,9 +57,26 @@ Los campos se organizan en **secciones** en la página de detalle de la ficha. P
 - Crear secciones con nombre para agrupar campos relacionados
 - Configurar secciones con diseño de **1 columna** o **2 columnas**
 - Organizar campos en **grupos** dentro de una sección (renderizados como sub-encabezados colapsables)
-- Arrastrar campos entre secciones y reordenarlos
+- Reordenar campos dentro de una sección arrastrándolos, y mover un campo a otra sección desde su acción **mover**
 
 El nombre de sección especial `__description` agrega campos a la sección Descripción de la página de detalle.
+
+#### Puntuación de calidad de datos
+
+La puntuación de **calidad de datos** de una tarjeta mide de forma ponderada cuán completa está. Cada factor que contribuye —cada campo y cuatro factores integrados— se gestiona en un solo lugar: la pestaña **Calidad de datos** del editor del tipo de tarjeta. (El editor se organiza en pestañas: General, Relaciones, Roles de partes interesadas y Calidad de datos; las traducciones están disponibles desde el icono del encabezado.)
+
+La importancia de cada factor se establece con un control deslizante simple de cuatro niveles, que también muestra el número subyacente:
+
+- **Ignorar (0)**: excluido por completo de la puntuación.
+- **Normal (1)**: cuenta una vez (predeterminado).
+- **Importante (2)**: cuenta el doble.
+- **Crítico (3)**: cuenta el triple.
+
+El panel enumera los cuatro **factores integrados** —**Descripción**, **Ciclo de vida** (si hay alguna fecha de ciclo de vida establecida), **Relaciones obligatorias** y **Etiquetas obligatorias**— seguidos de cada campo agrupado por su sección, todos con el mismo control deslizante. Por ejemplo, establezca el **Ciclo de vida** en *Ignorar* para un tipo cuyas tarjetas legítimamente nunca llevan fechas, para que no se penalicen.
+
+Una barra de **composición de la puntuación** en la parte superior del panel muestra la proporción de cada factor en la puntuación máxima posible, para ver de un vistazo qué factores dominan. En el diseño de la tarjeta de la pestaña **Main**, cada campo —y las secciones integradas Descripción, Ciclo de vida y Relaciones— muestra una pequeña insignia con su nivel actual, para ver la ponderación sin salir de esa pestaña.
+
+Cambiar cualquier importancia vuelve a puntuar inmediatamente todas las tarjetas existentes de ese tipo. Los campos nuevos son *Normal* de forma predeterminada, por lo que cuentan para la puntuación en cuanto los agrega.
 
 #### Subtipos (Sub-plantillas)
 
@@ -191,3 +208,4 @@ Para cada tipo de ficha, la sección **Diseño** en el panel del tipo controla c
 - **Visibilidad** — Oculte secciones que no sean relevantes para un tipo
 - **Expansión predeterminada** — Elija si cada sección comienza expandida o colapsada
 - **Diseño de columnas** — Configure 1 o 2 columnas por sección personalizada
+- **Mover campos entre secciones** — Usar la acción **mover** de un campo (junto a sus botones de editar y eliminar) para reubicarlo en otra sección, conservando su configuración

@@ -193,20 +193,22 @@ async def _kpi_snapshot_loop() -> None:
 
 
 async def _promote_recurring_tasks_loop() -> None:
-    """Daily background loop that flips eligible ``scheduled`` task
-    occurrences to ``open`` once their lead-time window opens.
+    """Daily background loop that flips eligible ``scheduled`` recurring
+    items to ``open`` once their lead-time window opens.
 
-    Runs once per UTC day at ``_TASK_PROMOTION_HOUR_UTC`` (03:00). Each
-    promotion creates the assignee's system Todo, fires the
-    ``task_assigned`` notification, and emits a
-    ``risk_mitigation_task.activated`` event onto the per-card history
-    timeline. The promotion service is idempotent on already-open
-    occurrences, so a transient restart that doubles a tick is safe.
+    Covers both risk mitigation-task occurrences and recurring card todos
+    in the same pass. Runs once per UTC day at ``_TASK_PROMOTION_HOUR_UTC``
+    (03:00). Each promotion fires the relevant ``task_assigned`` /
+    ``todo_assigned`` notification (and, for tasks, the system Todo +
+    ``risk_mitigation_task.activated`` event). Both promotion services are
+    idempotent on already-open rows, so a transient restart that doubles a
+    tick is safe.
     """
     from datetime import datetime, timedelta, timezone
 
     from app.database import async_session
     from app.services.risk_mitigation_task_service import promote_scheduled_occurrences
+    from app.services.todo_recurrence_service import promote_scheduled_todos
 
     while True:
         try:
@@ -218,16 +220,22 @@ async def _promote_recurring_tasks_loop() -> None:
 
             async with async_session() as db:
                 promoted = await promote_scheduled_occurrences(db)
+                promoted_todos = await promote_scheduled_todos(db)
                 await db.commit()
                 if promoted:
                     logger.info(
                         "Promoted %d scheduled mitigation task occurrence(s) to open",
                         promoted,
                     )
+                if promoted_todos:
+                    logger.info(
+                        "Promoted %d scheduled recurring todo(s) to open",
+                        promoted_todos,
+                    )
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Error in mitigation task promotion loop")
+            logger.exception("Error in recurring item promotion loop")
             # Same backoff pattern as the KPI loop — avoid a tight retry
             # spiral if the DB is unavailable.
             await asyncio.sleep(3600)
@@ -694,11 +702,15 @@ app.add_middleware(
 # payload. Unknown / absent header => no tag (keeps existing UI events clean).
 import uuid as _uuid_for_batch  # noqa: E402
 
+from app.core.security import decode_access_token as _decode_token_for_impersonation  # noqa: E402
 from app.services.event_bus import (  # noqa: E402
     request_batch_id as _request_batch_id,
 )
 from app.services.event_bus import (  # noqa: E402
     request_endpoint as _request_endpoint,
+)
+from app.services.event_bus import (  # noqa: E402
+    request_impersonation as _request_impersonation,
 )
 from app.services.event_bus import (  # noqa: E402
     request_origin as _request_origin,
@@ -740,12 +752,35 @@ async def capture_request_origin(request, call_next):
     # we can do — concrete UUIDs included.
     endpoint_token = _request_endpoint.set(f"{request.method} {request.url.path}")
 
+    # Role-impersonation context: when an admin has activated a "View as
+    # role" session, the JWT carries an ``impersonated_role`` claim. Decode
+    # the token here (no DB round-trip — it's pure-Python) so that downstream
+    # permission checks via PermissionService and audit stamping via
+    # event_bus.publish both see the same impersonation state. JWT decode
+    # failures (missing/expired/tampered) silently leave the contextvar
+    # unset — request auth itself runs later in get_current_user and will
+    # reject the request there.
+    raw_auth = request.headers.get("Authorization", "")
+    raw_token = (
+        raw_auth[7:] if raw_auth.startswith("Bearer ") else request.cookies.get("access_token", "")
+    )
+    impersonation_pair: tuple[str, str] | None = None
+    if raw_token:
+        payload = _decode_token_for_impersonation(raw_token)
+        if payload:
+            impersonated_role = payload.get("impersonated_role")
+            sub = payload.get("sub")
+            if impersonated_role and sub:
+                impersonation_pair = (str(sub), str(impersonated_role))
+    impersonation_token = _request_impersonation.set(impersonation_pair)
+
     try:
         return await call_next(request)
     finally:
         _request_origin.reset(token)
         _request_batch_id.reset(batch_token)
         _request_endpoint.reset(endpoint_token)
+        _request_impersonation.reset(impersonation_token)
 
 
 app.middleware("http")(capture_request_origin)
